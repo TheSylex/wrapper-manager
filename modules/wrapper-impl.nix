@@ -116,6 +116,9 @@ in
             echo "::: Wrapping packages in out/bin ..."
 
             for file in "$out/bin/"*; do
+              # skip non-executable files
+              [[ -f "$file" && -x "$file" ]] || continue
+
               # check if $file is in $already_wrapped
               prog="$(basename "$file")"
               if [[ " ''${already_wrapped[@]} " =~ " $prog " ]]; then
@@ -150,6 +153,8 @@ in
 
             pushd "$out/bin" > /dev/null
             for exe in *; do
+              [[ -f "$exe" && -x "$exe" ]] || continue
+
               # Fix .desktop files
               # This list of fixes might not be exhaustive
               for file in $out/share/applications/*; do
