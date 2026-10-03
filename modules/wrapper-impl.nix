@@ -60,6 +60,7 @@ in
           nativeBuildInputs = [
             pkgs.makeBinaryWrapper
             pkgs.makeWrapper
+            pkgs.lndir
           ];
           passthru = (config.basePackage.passthru or { }) // {
             unwrapped = config.basePackage;
@@ -141,32 +142,41 @@ in
 
             ## Fix desktop files
 
-            # Some derivations have nested symlinks here
-            if [[ -d $out/share/applications && ! -w $out/share/applications ]]; then
+            # Materialize the share directory without copying its contents.
+            if [[ -L $out/share && -d $out/share/applications && ! -w $out/share/applications ]]; then
               echo "Detected nested symlink, fixing"
-              temp=$(mktemp -d)
-              cp -v $out/share/applications/* $temp
-              rm -vf $out/share/applications
-              mkdir -pv $out/share/applications
-              cp -v $temp/* $out/share/applications
+              share=$(readlink $out/share)
+              rm -vf $out/share
+              mkdir -pv $out/share
+              lndir -silent "$share" $out/share
             fi
 
-            pushd "$out/bin" > /dev/null
-            for exe in *; do
-              [[ -f "$exe" && -x "$exe" ]] || continue
+            if [[ -d $out/share/applications ]]; then
+              pushd "$out/bin" > /dev/null
+              for exe in *; do
+                [[ -f "$exe" && -x "$exe" ]] || continue
 
-              # Fix .desktop files
-              # This list of fixes might not be exhaustive
-              for file in $out/share/applications/*; do
-                trap "set +x" ERR
-                set -x
-                sed -i "s#/nix/store/.*/bin/$exe #$out/bin/$exe #" "$file"
-                sed -i -E "s#Exec=$exe([[:space:]]*)#Exec=$out/bin/$exe\1#g" "$file"
-                sed -i -E "s#TryExec=$exe([[:space:]]*)#TryExec=$out/bin/$exe\1#g" "$file"
-                set +x
+                # Fix .desktop files
+                # This list of fixes might not be exhaustive
+                for file in $out/share/applications/*; do
+                  [[ -f "$file" ]] || continue
+                  if [[ -L "$file" ]]; then
+                    temp=$(mktemp)
+                    cp "$file" "$temp"
+                    rm "$file"
+                    mv "$temp" "$file"
+                  fi
+                  chmod u+w "$file"
+                  trap "set +x" ERR
+                  set -x
+                  sed -i "s#/nix/store/.*/bin/$exe #$out/bin/$exe #" "$file"
+                  sed -i -E "s#Exec=$exe([[:space:]]*)#Exec=$out/bin/$exe\1#g" "$file"
+                  sed -i -E "s#TryExec=$exe([[:space:]]*)#TryExec=$out/bin/$exe\1#g" "$file"
+                  set +x
+                done
               done
-            done
-            popd > /dev/null
+              popd > /dev/null
+            fi
 
             ${lib.optionalString hasMan ''
               mkdir -p ''${!outputMan}
